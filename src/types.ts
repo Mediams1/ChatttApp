@@ -13,6 +13,7 @@ export interface Message {
   senderId: string;
   receiverId: string;
   content: string;
+  image?: string; // Base64 image
   timestamp: string;
   read: boolean;
 }

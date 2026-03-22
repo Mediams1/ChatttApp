@@ -1,5 +1,5 @@
 {
-  "name": "Cloud Migration Assistant",
-  "description": "Asistente para migrar proyectos desde Hostinger/Laravel hacia Git y Render/Cloud Run.",
+  "name": "Whatbenny",
+  "description": "Aplicación de chat moderna con biometría y tiempo real.",
   "requestFramePermissions": []
 }

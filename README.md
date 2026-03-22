@@ -1,4 +1,4 @@
-# ChatApp con Biometría y WebSockets
+# Whatbenny con Biometría y WebSockets
 
 Esta es una aplicación de chat moderna construida con **React, Node.js (Express), Socket.io y Tailwind CSS**.
 

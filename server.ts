@@ -18,9 +18,9 @@ import type { User, Message } from './src/types';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const JWT_SECRET = process.env.JWT_SECRET || 'chatapp-secret-key';
-const RP_ID = 'localhost'; // In production, this should be your domain
+const JWT_SECRET = process.env.JWT_SECRET || 'whatbenny-secret-key';
 const ORIGIN = process.env.APP_URL || 'http://localhost:3000';
+const RP_ID = ORIGIN.replace(/^https?:\/\//, '').split(':')[0]; // Extract domain from URL
 
 async function startServer() {
   const app = express();
@@ -30,10 +30,11 @@ async function startServer() {
       origin: '*',
       methods: ['GET', 'POST'],
     },
+    maxHttpBufferSize: 1e7, // 10MB limit for images
   });
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' })); // Allow larger payloads for base64 images
 
   // In-memory storage (Replace with a real database like Firebase or MongoDB)
   const users: User[] = [];
@@ -53,6 +54,7 @@ async function startServer() {
       email,
       online: false,
       biometricCredentials: [],
+      avatar: `https://picsum.photos/seed/${username}/200`,
     };
     // In a real app, save hashedPassword to a separate table
     (newUser as any).password = hashedPassword;
@@ -70,6 +72,18 @@ async function startServer() {
     res.json({ token, user });
   });
 
+  // --- Profile Routes ---
+  app.post('/api/user/update-profile', async (req, res) => {
+    const { userId, avatar, username } = req.body;
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (avatar) user.avatar = avatar;
+    if (username) user.username = username;
+
+    res.json({ message: 'Profile updated successfully', user });
+  });
+
   // --- WebAuthn (Biometrics) Routes ---
   app.post('/api/auth/biometric/register-options', async (req, res) => {
     const { userId } = req.body;
@@ -77,7 +91,7 @@ async function startServer() {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const options = await generateRegistrationOptions({
-      rpName: 'ChatApp',
+      rpName: 'Whatbenny',
       rpID: RP_ID,
       userID: Buffer.from(user.id),
       userName: user.email,
