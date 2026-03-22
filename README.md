@@ -1,11 +1,22 @@
-<div align="center">
+# ChatApp con Biometría y WebSockets
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Esta es una aplicación de chat moderna construida con **React, Node.js (Express), Socket.io y Tailwind CSS**.
 
-  <h1>Built with AI Studio</h2>
+## Características principales:
+- **Biometría (WebAuthn):** Inicia sesión con Face ID o Huella dactilar.
+- **Tiempo Real:** Mensajería instantánea con WebSockets.
+- **Notificaciones:** Avisos nativos de nuevos mensajes.
+- **Diseño Oscuro:** Interfaz elegante inspirada en aplicaciones de chat premium.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Instalación Local:
+1. Clona el repo.
+2. Ejecuta `npm install`.
+3. Crea un archivo `.env` basado en `.env.example`.
+4. Ejecuta `npm run dev`.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
-</div>
+## Despliegue en Render:
+1. Crea un **Web Service**.
+2. Conecta tu repo de GitHub.
+3. Build Command: `npm install && npm run build`
+4. Start Command: `npm start`
+5. Configura las variables de entorno: `JWT_SECRET` y `APP_URL`.
