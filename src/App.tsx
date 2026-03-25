@@ -215,9 +215,10 @@ export default function App() {
           videoRef.current.srcObject = stream;
         }
 
-        for (let i = 0; i <= 100; i += 5) {
+        // Increased duration for Face ID recognition feel
+        for (let i = 0; i <= 100; i += 2) {
           setScanProgress(i);
-          await new Promise(r => setTimeout(r, 80));
+          await new Promise(r => setTimeout(r, 60)); // Total ~3 seconds
         }
 
         stream.getTracks().forEach(track => track.stop());
@@ -233,9 +234,9 @@ export default function App() {
     if (type === 'fingerprint') {
       setIsScanningFinger(true);
       setScanProgress(0);
-      for (let i = 0; i <= 100; i += 5) {
+      for (let i = 0; i <= 100; i += 4) {
         setScanProgress(i);
-        await new Promise(r => setTimeout(r, 60));
+        await new Promise(r => setTimeout(r, 60)); // Total ~1.5 seconds
       }
       setIsScanningFinger(false);
     }
@@ -584,12 +585,14 @@ export default function App() {
                 <div key={m.id} className={`flex ${m.senderId === user.id ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[70%] p-4 rounded-2xl relative ${m.senderId === user.id ? 'bg-purple-600 text-white rounded-tr-none shadow-lg shadow-purple-600/20' : 'bg-white/5 text-white rounded-tl-none border border-white/5'}`}>
                     {m.image && (
-                      <img 
-                        src={m.image} 
-                        alt="Shared" 
-                        className="rounded-xl mb-2 max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => window.open(m.image, '_blank')}
-                      />
+                      <div className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                        <img 
+                          src={m.image} 
+                          alt="Shared" 
+                          className="max-w-[240px] max-h-[320px] w-auto h-auto object-contain cursor-pointer hover:scale-105 transition-transform duration-300"
+                          onClick={() => window.open(m.image, '_blank')}
+                        />
+                      </div>
                     )}
                     {m.file && (
                       <div className="bg-black/20 p-3 rounded-xl mb-2 flex items-center gap-3 border border-white/5">
@@ -771,13 +774,15 @@ export default function App() {
             >
               <div className="relative w-72 h-72 mb-12">
                 {/* Circular Camera View */}
-                <div className="absolute inset-0 rounded-full overflow-hidden border-4 border-purple-500/30 shadow-[0_0_50px_rgba(168,85,247,0.2)]">
+                <div className="absolute inset-0 rounded-full overflow-hidden border-4 border-purple-500/30 shadow-[0_0_50px_rgba(168,85,247,0.3)]">
                   <video 
                     ref={videoRef} 
                     autoPlay 
                     playsInline 
                     className="w-full h-full object-cover scale-x-[-1]"
                   />
+                  {/* Scanning Grid Effect */}
+                  <div className="absolute inset-0 bg-[linear-gradient(rgba(168,85,247,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(168,85,247,0.1)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none" />
                 </div>
                 
                 {/* Scanning Overlay */}
@@ -788,7 +793,7 @@ export default function App() {
                     r="140"
                     fill="none"
                     stroke="rgba(168,85,247,0.1)"
-                    strokeWidth="8"
+                    strokeWidth="12"
                   />
                   <motion.circle
                     cx="144"
@@ -796,24 +801,29 @@ export default function App() {
                     r="140"
                     fill="none"
                     stroke="#a855f7"
-                    strokeWidth="8"
+                    strokeWidth="12"
                     strokeDasharray="880"
                     strokeDashoffset={880 - (880 * scanProgress) / 100}
                     strokeLinecap="round"
-                    className="transition-all duration-100 ease-linear"
+                    className="transition-all duration-150 ease-linear"
                   />
                 </svg>
 
                 {/* Face Frame UI */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-48 h-64 border-2 border-white/20 rounded-[4rem] relative">
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-purple-500 rounded-full blur-xl animate-pulse" />
-                  </div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <motion.div 
+                    animate={{ scale: [1, 1.02, 1] }}
+                    transition={{ duration: 2, repeat: Infinity }}
+                    className="w-52 h-68 border-2 border-white/30 rounded-[4.5rem] relative"
+                  >
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-1 bg-purple-500 rounded-full shadow-[0_0_15px_rgba(168,85,247,1)]" />
+                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-12 h-1 bg-purple-500 rounded-full shadow-[0_0_15px_rgba(168,85,247,1)]" />
+                  </motion.div>
                 </div>
               </div>
 
-              <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Configurando Face ID</h3>
-              <p className="text-gray-400 text-center mb-8 px-8">Mueve tu cabeza lentamente para completar el círculo.</p>
+              <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Reconociendo Rostro...</h3>
+              <p className="text-gray-400 text-center mb-8 px-8">Mantén tu rostro dentro del marco y no te muevas.</p>
               
               <div className="w-full max-w-[200px] h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <motion.div 
