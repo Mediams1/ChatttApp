@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
@@ -18,9 +19,12 @@ import type { User, Message } from './src/types';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const APP_URL = process.env.APP_URL || 'http://localhost:3000';
+const ORIGIN = APP_URL.startsWith('http') ? APP_URL.replace(/\/$/, '') : `https://${APP_URL.replace(/\/$/, '')}`;
+const RP_ID = ORIGIN.replace(/^https?:\/\//, '').split(':')[0];
 const JWT_SECRET = process.env.JWT_SECRET || 'whatbenny-secret-key';
-const ORIGIN = process.env.APP_URL || 'http://localhost:3000';
-const RP_ID = ORIGIN.replace(/^https?:\/\//, '').split(':')[0]; // Extract domain from URL
+
+console.log(`WebAuthn Config: ORIGIN=${ORIGIN}, RP_ID=${RP_ID}`);
 
 async function startServer() {
   const app = express();
@@ -34,11 +38,35 @@ async function startServer() {
   });
 
   app.use(cors());
-  app.use(express.json({ limit: '10mb' })); // Allow larger payloads for base64 images
+  app.use(express.json({ limit: '10mb' }));
 
-  // In-memory storage (Replace with a real database like Firebase or MongoDB)
-  const users: User[] = [];
-  const messages: Message[] = [];
+  // Simple file-based persistence
+  const USERS_FILE = path.join(__dirname, 'users.json');
+  const MESSAGES_FILE = path.join(__dirname, 'messages.json');
+
+  let users: User[] = [];
+  let messages: Message[] = [];
+
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+    }
+    if (fs.existsSync(MESSAGES_FILE)) {
+      messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf-8'));
+    }
+  } catch (err) {
+    console.error('Error loading data:', err);
+  }
+
+  const saveData = () => {
+    try {
+      fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+      fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
+    } catch (err) {
+      console.error('Error saving data:', err);
+    }
+  };
+
   const currentChallenges: Map<string, string> = new Map();
 
   // --- Auth Routes ---
@@ -59,6 +87,7 @@ async function startServer() {
     // In a real app, save hashedPassword to a separate table
     (newUser as any).password = hashedPassword;
     users.push(newUser);
+    saveData();
     res.json({ message: 'User registered successfully' });
   });
 
@@ -72,6 +101,21 @@ async function startServer() {
     res.json({ token, user });
   });
 
+  app.get('/api/auth/me', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token provided' });
+
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+      const user = users.find(u => u.id === decoded.userId);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      res.json({ user });
+    } catch (err) {
+      res.status(401).json({ error: 'Invalid token' });
+    }
+  });
+
   // --- Profile Routes ---
   app.post('/api/user/update-profile', async (req, res) => {
     const { userId, avatar, username } = req.body;
@@ -81,6 +125,7 @@ async function startServer() {
     if (avatar) user.avatar = avatar;
     if (username) user.username = username;
 
+    saveData();
     res.json({ message: 'Profile updated successfully', user });
   });
 
@@ -99,7 +144,8 @@ async function startServer() {
       authenticatorSelection: {
         residentKey: 'preferred',
         userVerification: 'preferred',
-        authenticatorAttachment: 'platform', // Forces FaceID/Fingerprint
+        // Removing platform attachment requirement to increase compatibility
+        // but still preferring it if available
       },
     });
 
@@ -118,7 +164,7 @@ async function startServer() {
       const verification = await verifyRegistrationResponse({
         response: body,
         expectedChallenge,
-        expectedOrigin: ORIGIN,
+        expectedOrigin: [ORIGIN, `${ORIGIN}/`], // Allow both with and without trailing slash
         expectedRPID: RP_ID,
       });
 
@@ -131,6 +177,7 @@ async function startServer() {
           transports: body.response.transports,
         });
         currentChallenges.delete(userId);
+        saveData();
         res.json({ verified: true });
       } else {
         res.status(400).json({ verified: false });
@@ -173,7 +220,7 @@ async function startServer() {
       const verification = await verifyAuthenticationResponse({
         response: body,
         expectedChallenge,
-        expectedOrigin: ORIGIN,
+        expectedOrigin: [ORIGIN, `${ORIGIN}/`],
         expectedRPID: RP_ID,
         credential: {
           id: credential.credentialID,
@@ -222,6 +269,7 @@ async function startServer() {
 
     socket.on('send_message', (data: Message) => {
       messages.push(data);
+      saveData();
       io.to(data.receiverId).emit('receive_message', data);
       io.to(data.senderId).emit('message_sent', data);
     });
