@@ -150,6 +150,8 @@ async function startServer() {
     if (type === 'face') user.biometrics.faceIdEnabled = true;
     if (type === 'fingerprint') user.biometrics.fingerprintEnabled = true;
     
+    console.log(`Biometric registered for user ${user.username}: type=${type}, face=${user.biometrics.faceIdEnabled}, finger=${user.biometrics.fingerprintEnabled}`);
+    
     saveData();
     res.json({ verified: true, secret: user.biometrics.secret });
   });

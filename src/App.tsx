@@ -203,56 +203,89 @@ export default function App() {
       return;
     }
 
-    // Visual animation
+    // Visual animation and verification
     if (type === 'face') {
       setIsScanningFace(true);
       setScanProgress(0);
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
         if (videoRef.current) videoRef.current.srcObject = stream;
-        for (let i = 0; i <= 100; i += 10) {
+        
+        for (let i = 0; i <= 100; i += 5) {
           setScanProgress(i);
           await new Promise(r => setTimeout(r, 80));
         }
+        
         stream.getTracks().forEach(track => track.stop());
-      } catch (err) { console.error(err); }
-      setIsScanningFace(false);
+        
+        // Keep scanning UI for a moment while we "verify"
+        setScanProgress(100);
+        
+        const biometricSecret = localStorage.getItem('biometric_secret');
+        if (!biometricSecret) {
+          alert(`No has habilitado la biometría en este navegador. Por favor, inicia sesión con tu contraseña primero.`);
+          setIsScanningFace(false);
+          return;
+        }
+
+        const res = await fetch('/api/auth/biometric/virtual-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, secret: biometricSecret, type })
+        });
+        
+        const data = await res.json();
+        
+        if (data.verified) {
+          setToken(data.token);
+          setUser(data.user);
+          localStorage.setItem('token', data.token);
+        } else {
+          alert(data.error || 'Error en Face ID.');
+        }
+      } catch (err) { 
+        console.error('Face ID Error:', err);
+        alert('Error de Face ID: No se pudo acceder a la cámara o el escaneo falló.');
+      } finally {
+        setIsScanningFace(false);
+      }
     } else {
       setIsScanningFinger(true);
       setScanProgress(0);
-      for (let i = 0; i <= 100; i += 10) {
-        setScanProgress(i);
-        await new Promise(r => setTimeout(r, 50));
-      }
-      setIsScanningFinger(false);
-    }
+      try {
+        for (let i = 0; i <= 100; i += 5) {
+          setScanProgress(i);
+          await new Promise(r => setTimeout(r, 50));
+        }
+        
+        const biometricSecret = localStorage.getItem('biometric_secret');
+        if (!biometricSecret) {
+          alert(`No has habilitado la biometría en este navegador. Por favor, inicia sesión con tu contraseña primero.`);
+          setIsScanningFinger(false);
+          return;
+        }
 
-    try {
-      const biometricSecret = localStorage.getItem('biometric_secret');
-
-      if (!biometricSecret) {
-        alert(`No has habilitado la biometría en este navegador. Por favor, inicia sesión con tu contraseña primero.`);
-        return;
+        const res = await fetch('/api/auth/biometric/virtual-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, secret: biometricSecret, type })
+        });
+        
+        const data = await res.json();
+        
+        if (data.verified) {
+          setToken(data.token);
+          setUser(data.user);
+          localStorage.setItem('token', data.token);
+        } else {
+          alert(data.error || 'Error en Huella.');
+        }
+      } catch (err) {
+        console.error('Fingerprint Error:', err);
+        alert('Error en el sistema de huella.');
+      } finally {
+        setIsScanningFinger(false);
       }
-
-      const res = await fetch('/api/auth/biometric/virtual-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, secret: biometricSecret, type })
-      });
-      
-      const data = await res.json();
-      
-      if (data.verified) {
-        setToken(data.token);
-        setUser(data.user);
-        localStorage.setItem('token', data.token);
-      } else {
-        alert(data.error || 'Error en biometría.');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Error en el sistema de biometría.');
     }
   };
 
@@ -271,17 +304,22 @@ export default function App() {
           if (videoRef.current) videoRef.current.srcObject = stream;
           for (let i = 0; i <= 100; i += 5) {
             setScanProgress(i);
-            await new Promise(r => setTimeout(r, 60));
+            await new Promise(r => setTimeout(r, 100));
           }
           stream.getTracks().forEach(track => track.stop());
-        } catch (err) { console.error(err); }
-        setIsScanningFace(false);
+          setIsScanningFace(false);
+        } catch (err) { 
+          console.error('Face ID Registration Error:', err);
+          alert('No se pudo acceder a la cámara para registrar Face ID.');
+          setIsScanningFace(false);
+          return; // Stop if camera fails
+        }
       } else {
         setIsScanningFinger(true);
         setScanProgress(0);
         for (let i = 0; i <= 100; i += 5) {
           setScanProgress(i);
-          await new Promise(r => setTimeout(r, 40));
+          await new Promise(r => setTimeout(r, 80));
         }
         setIsScanningFinger(false);
       }
@@ -794,11 +832,17 @@ export default function App() {
                         </div>
                         <div className="text-left">
                           <p className="font-medium text-sm">Face ID / Huella</p>
-                          <p className="text-[10px] text-gray-500">
-                            {user?.biometrics?.faceIdEnabled || user?.biometrics?.fingerprintEnabled 
-                              ? 'Habilitado' 
-                              : 'Configura el acceso biométrico'}
-                          </p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {user?.biometrics?.faceIdEnabled && (
+                              <span className="text-[9px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter">Face ID</span>
+                            )}
+                            {user?.biometrics?.fingerprintEnabled && (
+                              <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter">Huella</span>
+                            )}
+                            {!user?.biometrics?.faceIdEnabled && !user?.biometrics?.fingerprintEnabled && (
+                              <p className="text-[10px] text-gray-500">Configura el acceso biométrico</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <Plus className="w-5 h-5 text-gray-500 group-hover:text-white transition-colors" />
