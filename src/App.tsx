@@ -17,7 +17,11 @@ import {
   Image as ImageIcon,
   Settings,
   X,
-  Upload
+  Upload,
+  FileText,
+  Download,
+  Smartphone,
+  ScanFace
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { User, Message, Conversation } from './types';
@@ -43,10 +47,16 @@ export default function App() {
   const [profileUsername, setProfileUsername] = useState('');
   const [profileAvatar, setProfileAvatar] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [showBiometricModal, setShowBiometricModal] = useState(false);
+  const [biometricType, setBiometricType] = useState<'face' | 'fingerprint' | null>(null);
+  const [isScanningFace, setIsScanningFace] = useState(false);
+  const [isScanningFinger, setIsScanningFinger] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (user) {
@@ -160,6 +170,10 @@ export default function App() {
   };
 
   const handleBiometricLogin = async () => {
+    if (!email) {
+      alert('Por favor, ingresa tu correo electrónico para usar la biometría.');
+      return;
+    }
     try {
       const resOptions = await fetch('/api/auth/biometric/login-options', {
         method: 'POST',
@@ -188,9 +202,46 @@ export default function App() {
     }
   };
 
-  const handleRegisterBiometric = async () => {
+  const handleRegisterBiometric = async (type: 'face' | 'fingerprint') => {
     if (!user) return;
+    
+    if (type === 'face') {
+      try {
+        setIsScanningFace(true);
+        setScanProgress(0);
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+
+        for (let i = 0; i <= 100; i += 5) {
+          setScanProgress(i);
+          await new Promise(r => setTimeout(r, 80));
+        }
+
+        stream.getTracks().forEach(track => track.stop());
+        setIsScanningFace(false);
+      } catch (err) {
+        console.error('Error accessing camera:', err);
+        alert('Se requiere acceso a la cámara para configurar Face ID.');
+        setIsScanningFace(false);
+        return;
+      }
+    }
+
+    if (type === 'fingerprint') {
+      setIsScanningFinger(true);
+      setScanProgress(0);
+      for (let i = 0; i <= 100; i += 5) {
+        setScanProgress(i);
+        await new Promise(r => setTimeout(r, 60));
+      }
+      setIsScanningFinger(false);
+    }
+
     try {
+      setBiometricType(type);
       const resOptions = await fetch('/api/auth/biometric/register-options', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -208,21 +259,28 @@ export default function App() {
       const data = await resVerify.json();
       
       if (data.verified) {
-        alert('Biometría registrada con éxito.');
+        alert(`${type === 'face' ? 'Face ID' : 'Huella'} registrada con éxito.`);
+        setShowBiometricModal(false);
       }
     } catch (err) {
       console.error(err);
+      alert('Error al registrar biometría. Asegúrate de que tu dispositivo sea compatible.');
+    } finally {
+      setBiometricType(null);
     }
   };
 
-  const sendMessage = (image?: string) => {
-    if ((!newMessage.trim() && !image) || !activeConversation || !user || !socket) return;
+  const sendMessage = (image?: string, file?: string, fileName?: string, fileType?: string) => {
+    if ((!newMessage.trim() && !image && !file) || !activeConversation || !user || !socket) return;
     const msg: Message = {
       id: Math.random().toString(36).substr(2, 9),
       senderId: user.id,
       receiverId: activeConversation.id,
       content: newMessage,
       image: image,
+      file: file,
+      fileName: fileName,
+      fileType: fileType,
       timestamp: new Date().toISOString(),
       read: false
     };
@@ -230,12 +288,12 @@ export default function App() {
     setNewMessage('');
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, isAvatar = false) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, isAvatar = false) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('La imagen es demasiado grande (máx 5MB)');
+    if (file.size > 10 * 1024 * 1024) {
+      alert('El archivo es demasiado grande (máx 10MB)');
       return;
     }
 
@@ -245,7 +303,11 @@ export default function App() {
       if (isAvatar) {
         setProfileAvatar(base64);
       } else {
-        sendMessage(base64);
+        if (file.type.startsWith('image/')) {
+          sendMessage(base64);
+        } else {
+          sendMessage(undefined, base64, file.name, file.type);
+        }
       }
     };
     reader.readAsDataURL(file);
@@ -350,22 +412,31 @@ export default function App() {
             </button>
           </form>
 
-          {isLogin && isBiometricAvailable && (
-            <div className="mt-6">
-              <div className="flex items-center gap-4 mb-4">
-                <div className="h-px flex-1 bg-white/5" />
-                <span className="text-xs text-gray-500 uppercase tracking-widest">O usa biometría</span>
-                <div className="h-px flex-1 bg-white/5" />
+            {isLogin && isBiometricAvailable && (
+              <div className="mt-6">
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="h-px flex-1 bg-white/5" />
+                  <span className="text-xs text-gray-500 uppercase tracking-widest">Acceso Rápido</span>
+                  <div className="h-px flex-1 bg-white/5" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={handleBiometricLogin}
+                    className="flex flex-col items-center justify-center gap-2 bg-white/5 border border-white/10 p-4 rounded-2xl hover:bg-white/10 transition-all active:scale-95 group"
+                  >
+                    <ScanFace className="w-6 h-6 text-purple-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-[10px] uppercase tracking-tighter font-bold">Face ID</span>
+                  </button>
+                  <button 
+                    onClick={handleBiometricLogin}
+                    className="flex flex-col items-center justify-center gap-2 bg-white/5 border border-white/10 p-4 rounded-2xl hover:bg-white/10 transition-all active:scale-95 group"
+                  >
+                    <Fingerprint className="w-6 h-6 text-blue-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-[10px] uppercase tracking-tighter font-bold">Huella</span>
+                  </button>
+                </div>
               </div>
-              <button 
-                onClick={handleBiometricLogin}
-                className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/10 py-3 rounded-xl hover:bg-white/10 transition-colors"
-              >
-                <Fingerprint className="w-5 h-5 text-blue-400" />
-                <span className="text-sm">Face ID / Huella</span>
-              </button>
-            </div>
-          )}
+            )}
 
           <div className="mt-8 text-center text-sm">
             <p className="text-gray-400">
@@ -520,6 +591,24 @@ export default function App() {
                         onClick={() => window.open(m.image, '_blank')}
                       />
                     )}
+                    {m.file && (
+                      <div className="bg-black/20 p-3 rounded-xl mb-2 flex items-center gap-3 border border-white/5">
+                        <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
+                          <FileText className="w-5 h-5 text-blue-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{m.fileName || 'Archivo'}</p>
+                          <p className="text-[9px] opacity-50 uppercase">{m.fileType?.split('/')[1] || 'DOC'}</p>
+                        </div>
+                        <a 
+                          href={m.file} 
+                          download={m.fileName}
+                          className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                        >
+                          <Download className="w-4 h-4" />
+                        </a>
+                      </div>
+                    )}
                     {m.content && <p className="text-sm leading-relaxed">{m.content}</p>}
                     <div className="flex items-center justify-end gap-1 mt-2">
                       <span className="text-[9px] opacity-60">{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -537,14 +626,21 @@ export default function App() {
                   type="file" 
                   ref={fileInputRef} 
                   className="hidden" 
-                  accept="image/*" 
-                  onChange={handleImageUpload}
+                  onChange={handleFileUpload}
                 />
                 <button 
                   onClick={() => fileInputRef.current?.click()}
                   className="p-3 text-gray-500 hover:text-purple-400 transition-colors bg-white/5 rounded-xl"
+                  title="Enviar Imagen"
                 >
                   <ImageIcon className="w-5 h-5" />
+                </button>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-3 text-gray-500 hover:text-blue-400 transition-colors bg-white/5 rounded-xl"
+                  title="Enviar Archivo/PDF"
+                >
+                  <FileText className="w-5 h-5" />
                 </button>
                 <input 
                   type="text" 
@@ -608,7 +704,7 @@ export default function App() {
                       ref={avatarInputRef} 
                       className="hidden" 
                       accept="image/*" 
-                      onChange={(e) => handleImageUpload(e, true)}
+                      onChange={(e) => handleFileUpload(e, true)}
                     />
                     <button 
                       onClick={() => avatarInputRef.current?.click()}
@@ -634,7 +730,7 @@ export default function App() {
                   <div className="pt-4">
                     <label className="text-xs text-gray-500 uppercase tracking-widest mb-4 block">Seguridad</label>
                     <button 
-                      onClick={handleRegisterBiometric}
+                      onClick={() => setShowBiometricModal(true)}
                       className="w-full flex items-center justify-between bg-white/5 border border-white/5 p-5 rounded-2xl hover:bg-white/10 transition-colors group"
                     >
                       <div className="flex items-center gap-4">
@@ -658,6 +754,182 @@ export default function App() {
                   GUARDAR CAMBIOS
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Face ID Scan Simulation Modal */}
+      <AnimatePresence>
+        {isScanningFace && (
+          <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl flex items-center justify-center z-[80] p-4">
+            <motion.div 
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="w-full max-w-md flex flex-col items-center"
+            >
+              <div className="relative w-72 h-72 mb-12">
+                {/* Circular Camera View */}
+                <div className="absolute inset-0 rounded-full overflow-hidden border-4 border-purple-500/30 shadow-[0_0_50px_rgba(168,85,247,0.2)]">
+                  <video 
+                    ref={videoRef} 
+                    autoPlay 
+                    playsInline 
+                    className="w-full h-full object-cover scale-x-[-1]"
+                  />
+                </div>
+                
+                {/* Scanning Overlay */}
+                <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none">
+                  <circle
+                    cx="144"
+                    cy="144"
+                    r="140"
+                    fill="none"
+                    stroke="rgba(168,85,247,0.1)"
+                    strokeWidth="8"
+                  />
+                  <motion.circle
+                    cx="144"
+                    cy="144"
+                    r="140"
+                    fill="none"
+                    stroke="#a855f7"
+                    strokeWidth="8"
+                    strokeDasharray="880"
+                    strokeDashoffset={880 - (880 * scanProgress) / 100}
+                    strokeLinecap="round"
+                    className="transition-all duration-100 ease-linear"
+                  />
+                </svg>
+
+                {/* Face Frame UI */}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-48 h-64 border-2 border-white/20 rounded-[4rem] relative">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-purple-500 rounded-full blur-xl animate-pulse" />
+                  </div>
+                </div>
+              </div>
+
+              <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Configurando Face ID</h3>
+              <p className="text-gray-400 text-center mb-8 px-8">Mueve tu cabeza lentamente para completar el círculo.</p>
+              
+              <div className="w-full max-w-[200px] h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <motion.div 
+                  className="h-full bg-purple-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${scanProgress}%` }}
+                />
+              </div>
+              <p className="mt-4 text-purple-400 font-mono text-sm">{scanProgress}%</p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Fingerprint Scan Simulation Modal */}
+      <AnimatePresence>
+        {isScanningFinger && (
+          <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl flex items-center justify-center z-[80] p-4">
+            <motion.div 
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="w-full max-w-md flex flex-col items-center"
+            >
+              <div className="relative w-48 h-48 mb-12 flex items-center justify-center">
+                {/* Fingerprint Icon with Progress */}
+                <div className="absolute inset-0 rounded-full border-2 border-blue-500/20 animate-ping" />
+                <div className="relative">
+                  <Fingerprint className="w-32 h-32 text-gray-700" />
+                  <motion.div 
+                    className="absolute inset-0 overflow-hidden"
+                    style={{ height: `${scanProgress}%`, bottom: 0, top: 'auto' }}
+                  >
+                    <Fingerprint className="w-32 h-32 text-blue-500 drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
+                  </motion.div>
+                </div>
+                
+                {/* Scanning Line */}
+                <motion.div 
+                  className="absolute left-0 right-0 h-1 bg-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.8)] z-10"
+                  animate={{ top: ['20%', '80%', '20%'] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                />
+              </div>
+
+              <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Escaneando Huella</h3>
+              <p className="text-gray-400 text-center mb-8 px-8">Mantén tu dedo sobre el sensor biométrico.</p>
+              
+              <div className="w-full max-w-[200px] h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <motion.div 
+                  className="h-full bg-blue-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${scanProgress}%` }}
+                />
+              </div>
+              <p className="mt-4 text-blue-400 font-mono text-sm">{scanProgress}%</p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Biometric Selection Modal */}
+      <AnimatePresence>
+        {showBiometricModal && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-xl flex items-center justify-center z-[70] p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-sm bg-[#1a162e] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl p-8"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="text-xl font-bold">Configurar Seguridad</h3>
+                <button onClick={() => setShowBiometricModal(false)} className="p-2 hover:bg-white/5 rounded-full">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <button 
+                  onClick={() => handleRegisterBiometric('face')}
+                  disabled={!!biometricType}
+                  className="w-full flex items-center gap-6 p-6 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all group active:scale-95"
+                >
+                  <div className="w-14 h-14 bg-purple-500/20 rounded-2xl flex items-center justify-center group-hover:bg-purple-500/30 transition-colors">
+                    <ScanFace className="w-7 h-7 text-purple-400" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-bold text-lg">Face ID</p>
+                    <p className="text-xs text-gray-500">Captura tu rostro para entrar</p>
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => handleRegisterBiometric('fingerprint')}
+                  disabled={!!biometricType}
+                  className="w-full flex items-center gap-6 p-6 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all group active:scale-95"
+                >
+                  <div className="w-14 h-14 bg-blue-500/20 rounded-2xl flex items-center justify-center group-hover:bg-blue-500/30 transition-colors">
+                    <Fingerprint className="w-7 h-7 text-blue-400" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-bold text-lg">Huella Digital</p>
+                    <p className="text-xs text-gray-500">Usa tu dedo para entrar</p>
+                  </div>
+                </button>
+              </div>
+
+              {biometricType && (
+                <div className="mt-8 text-center">
+                  <div className="w-12 h-12 border-4 border-purple-500/20 border-t-purple-500 rounded-full animate-spin mx-auto mb-4" />
+                  <p className="text-sm text-purple-400 animate-pulse">
+                    {biometricType === 'face' ? 'Capturando rostro...' : 'Escaneando huella...'}
+                  </p>
+                </div>
+              )}
             </motion.div>
           </div>
         )}

@@ -14,6 +14,9 @@ export interface Message {
   receiverId: string;
   content: string;
   image?: string; // Base64 image
+  file?: string; // Base64 file
+  fileName?: string;
+  fileType?: string;
   timestamp: string;
   read: boolean;
 }
