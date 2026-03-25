@@ -5,7 +5,11 @@ export interface User {
   avatar?: string;
   online: boolean;
   lastSeen?: string;
-  biometricCredentials?: any[];
+  biometrics?: {
+    faceIdEnabled: boolean;
+    fingerprintEnabled: boolean;
+    secret?: string;
+  };
 }
 
 export interface Message {

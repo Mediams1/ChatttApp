@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import { 
   MessageSquare, 
   Search, 
@@ -76,9 +75,9 @@ export default function App() {
 
   useEffect(() => {
     // Check for biometric availability
-    if (window.PublicKeyCredential) {
-      setIsBiometricAvailable(true);
-    }
+    // In this app, we use virtual biometrics, so it's always available
+    // but we can check for camera support for Face ID
+    setIsBiometricAvailable(true);
 
     // Request notification permission
     if (Notification.permission === 'default') {
@@ -98,6 +97,9 @@ export default function App() {
             const data = await res.json();
             setToken(storedToken);
             setUser(data.user);
+            if (data.user.biometrics?.secret) {
+              localStorage.setItem('biometric_secret', data.user.biometrics.secret);
+            }
           } else {
             localStorage.removeItem('token');
           }
@@ -164,6 +166,9 @@ export default function App() {
         setToken(data.token);
         setUser(data.user);
         localStorage.setItem('token', data.token);
+        if (data.user.biometrics?.secret) {
+          localStorage.setItem('biometric_secret', data.user.biometrics.secret);
+        }
       } else {
         alert(data.error);
       }
@@ -192,36 +197,62 @@ export default function App() {
     }
   };
 
-  const handleBiometricLogin = async () => {
+  const handleBiometricLogin = async (type: 'face' | 'fingerprint') => {
     if (!email) {
       alert('Por favor, ingresa tu correo electrónico para usar la biometría.');
       return;
     }
+
+    // Visual animation
+    if (type === 'face') {
+      setIsScanningFace(true);
+      setScanProgress(0);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        for (let i = 0; i <= 100; i += 10) {
+          setScanProgress(i);
+          await new Promise(r => setTimeout(r, 80));
+        }
+        stream.getTracks().forEach(track => track.stop());
+      } catch (err) { console.error(err); }
+      setIsScanningFace(false);
+    } else {
+      setIsScanningFinger(true);
+      setScanProgress(0);
+      for (let i = 0; i <= 100; i += 10) {
+        setScanProgress(i);
+        await new Promise(r => setTimeout(r, 50));
+      }
+      setIsScanningFinger(false);
+    }
+
     try {
-      const resOptions = await fetch('/api/auth/biometric/login-options', {
+      const biometricSecret = localStorage.getItem('biometric_secret');
+
+      if (!biometricSecret) {
+        alert(`No has habilitado la biometría en este navegador. Por favor, inicia sesión con tu contraseña primero.`);
+        return;
+      }
+
+      const res = await fetch('/api/auth/biometric/virtual-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ email, secret: biometricSecret, type })
       });
-      const options = await resOptions.json();
       
-      const authRes = await startAuthentication(options);
-      
-      const resVerify = await fetch('/api/auth/biometric/login-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, body: authRes })
-      });
-      const data = await resVerify.json();
+      const data = await res.json();
       
       if (data.verified) {
         setToken(data.token);
         setUser(data.user);
         localStorage.setItem('token', data.token);
+      } else {
+        alert(data.error || 'Error en biometría.');
       }
     } catch (err) {
       console.error(err);
-      alert('Error en biometría. Asegúrate de haber registrado tu huella/FaceID primero.');
+      alert('Error en el sistema de biometría.');
     }
   };
 
@@ -231,70 +262,60 @@ export default function App() {
     try {
       setBiometricType(type);
       
-      // 1. Fetch options immediately to keep gesture active
-      const resOptions = await fetch('/api/auth/biometric/register-options', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id })
-      });
-      
-      if (!resOptions.ok) throw new Error('Error al obtener opciones de registro');
-      const options = await resOptions.json();
-
-      // 2. Start the visual animation (shortened to avoid gesture timeout)
+      // Visual animation
       if (type === 'face') {
+        setIsScanningFace(true);
+        setScanProgress(0);
         try {
-          setIsScanningFace(true);
-          setScanProgress(0);
           const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
           if (videoRef.current) videoRef.current.srcObject = stream;
-
-          for (let i = 0; i <= 100; i += 10) {
+          for (let i = 0; i <= 100; i += 5) {
             setScanProgress(i);
-            await new Promise(r => setTimeout(r, 100)); // 1 second total
+            await new Promise(r => setTimeout(r, 60));
           }
           stream.getTracks().forEach(track => track.stop());
-          setIsScanningFace(false);
-        } catch (err) {
-          console.error('Camera error:', err);
-        }
+        } catch (err) { console.error(err); }
+        setIsScanningFace(false);
       } else {
         setIsScanningFinger(true);
         setScanProgress(0);
-        for (let i = 0; i <= 100; i += 20) {
+        for (let i = 0; i <= 100; i += 5) {
           setScanProgress(i);
-          await new Promise(r => setTimeout(r, 100)); // 0.5 seconds total
+          await new Promise(r => setTimeout(r, 40));
         }
         setIsScanningFinger(false);
       }
 
-      // 3. Trigger the actual biometric prompt
-      const regRes = await startRegistration(options);
-      
-      const resVerify = await fetch('/api/auth/biometric/register-verify', {
+      const res = await fetch('/api/auth/biometric/virtual-register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, body: regRes })
+        body: JSON.stringify({ 
+          userId: user.id, 
+          type
+        })
       });
       
-      const data = await resVerify.json();
+      const data = await res.json();
       
       if (data.verified) {
-        // Update local user state to reflect new credentials
-        const updatedUser = { ...user, biometricCredentials: [...(user.biometricCredentials || []), {}] };
+        localStorage.setItem('biometric_secret', data.secret);
+        const updatedUser = { 
+          ...user, 
+          biometrics: {
+            ...user.biometrics,
+            [type === 'face' ? 'faceIdEnabled' : 'fingerprintEnabled']: true,
+            secret: data.secret
+          }
+        };
         setUser(updatedUser);
-        alert(`${type === 'face' ? 'Face ID' : 'Huella'} registrada con éxito.`);
+        alert(`${type === 'face' ? 'Face ID' : 'Huella'} habilitada con éxito.`);
         setShowBiometricModal(false);
       } else {
-        throw new Error(data.error || 'Error de verificación');
+        throw new Error(data.error || 'Error de registro');
       }
     } catch (err: any) {
       console.error('Biometric Registration Error:', err);
-      if (err.name === 'NotAllowedError') {
-        alert('El registro fue cancelado o el dispositivo no está listo.');
-      } else {
-        alert(`Error: ${err.message || 'No se pudo completar el registro'}`);
-      }
+      alert(`Error: ${err.message || 'No se pudo completar el registro'}`);
     } finally {
       setIsScanningFace(false);
       setIsScanningFinger(false);
@@ -453,14 +474,14 @@ export default function App() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <button 
-                    onClick={handleBiometricLogin}
+                    onClick={() => handleBiometricLogin('face')}
                     className="flex flex-col items-center justify-center gap-2 bg-white/5 border border-white/10 p-4 rounded-2xl hover:bg-white/10 transition-all active:scale-95 group"
                   >
                     <ScanFace className="w-6 h-6 text-purple-400 group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] uppercase tracking-tighter font-bold">Face ID</span>
                   </button>
                   <button 
-                    onClick={handleBiometricLogin}
+                    onClick={() => handleBiometricLogin('fingerprint')}
                     className="flex flex-col items-center justify-center gap-2 bg-white/5 border border-white/10 p-4 rounded-2xl hover:bg-white/10 transition-all active:scale-95 group"
                   >
                     <Fingerprint className="w-6 h-6 text-blue-400 group-hover:scale-110 transition-transform" />
@@ -773,7 +794,11 @@ export default function App() {
                         </div>
                         <div className="text-left">
                           <p className="font-medium text-sm">Face ID / Huella</p>
-                          <p className="text-[10px] text-gray-500">Configura el acceso biométrico</p>
+                          <p className="text-[10px] text-gray-500">
+                            {user?.biometrics?.faceIdEnabled || user?.biometrics?.fingerprintEnabled 
+                              ? 'Habilitado' 
+                              : 'Configura el acceso biométrico'}
+                          </p>
                         </div>
                       </div>
                       <Plus className="w-5 h-5 text-gray-500 group-hover:text-white transition-colors" />

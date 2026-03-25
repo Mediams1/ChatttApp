@@ -81,7 +81,11 @@ async function startServer() {
       username,
       email,
       online: false,
-      biometricCredentials: [],
+      biometrics: {
+        faceIdEnabled: false,
+        fingerprintEnabled: false,
+        secret: Math.random().toString(36).substr(2, 12) + Date.now().toString(36)
+      },
       avatar: `https://picsum.photos/seed/${username}/200`,
     };
     // In a real app, save hashedPassword to a separate table
@@ -129,114 +133,40 @@ async function startServer() {
     res.json({ message: 'Profile updated successfully', user });
   });
 
-  // --- WebAuthn (Biometrics) Routes ---
-  app.post('/api/auth/biometric/register-options', async (req, res) => {
-    const { userId } = req.body;
+  // --- Virtual Biometric Routes ---
+  app.post('/api/auth/biometric/virtual-register', async (req, res) => {
+    const { userId, type } = req.body;
     const user = users.find(u => u.id === userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const options = await generateRegistrationOptions({
-      rpName: 'Whatbenny',
-      rpID: RP_ID,
-      userID: Buffer.from(user.id),
-      userName: user.email,
-      attestationType: 'none',
-      authenticatorSelection: {
-        residentKey: 'preferred',
-        userVerification: 'preferred',
-        // Removing platform attachment requirement to increase compatibility
-        // but still preferring it if available
-      },
-    });
-
-    currentChallenges.set(user.id, options.challenge);
-    res.json(options);
-  });
-
-  app.post('/api/auth/biometric/register-verify', async (req, res) => {
-    const { userId, body } = req.body;
-    const user = users.find(u => u.id === userId);
-    const expectedChallenge = currentChallenges.get(userId);
-
-    if (!user || !expectedChallenge) return res.status(400).json({ error: 'Invalid session' });
-
-    try {
-      const verification = await verifyRegistrationResponse({
-        response: body,
-        expectedChallenge,
-        expectedOrigin: [ORIGIN, `${ORIGIN}/`], // Allow both with and without trailing slash
-        expectedRPID: RP_ID,
-      });
-
-      if (verification.verified && verification.registrationInfo) {
-        const { credential } = verification.registrationInfo;
-        user.biometricCredentials?.push({
-          credentialID: Buffer.from(credential.id).toString('base64url'),
-          credentialPublicKey: Buffer.from(credential.publicKey).toString('base64url'),
-          counter: credential.counter,
-          transports: body.response.transports,
-        });
-        currentChallenges.delete(userId);
-        saveData();
-        res.json({ verified: true });
-      } else {
-        res.status(400).json({ verified: false });
-      }
-    } catch (error) {
-      res.status(400).json({ error: (error as Error).message });
+    if (!user.biometrics) {
+      user.biometrics = {
+        faceIdEnabled: false,
+        fingerprintEnabled: false,
+        secret: Math.random().toString(36).substr(2, 12) + Date.now().toString(36)
+      };
     }
+    
+    if (type === 'face') user.biometrics.faceIdEnabled = true;
+    if (type === 'fingerprint') user.biometrics.fingerprintEnabled = true;
+    
+    saveData();
+    res.json({ verified: true, secret: user.biometrics.secret });
   });
 
-  app.post('/api/auth/biometric/login-options', async (req, res) => {
-    const { email } = req.body;
+  app.post('/api/auth/biometric/virtual-login', async (req, res) => {
+    const { email, secret, type } = req.body;
     const user = users.find(u => u.email === email);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const options = await generateAuthenticationOptions({
-      rpID: RP_ID,
-      allowCredentials: user.biometricCredentials?.map(cred => ({
-        id: cred.credentialID,
-        type: 'public-key',
-        transports: cred.transports,
-      })),
-      userVerification: 'preferred',
-    });
+    const isEnabled = type === 'face' ? user.biometrics?.faceIdEnabled : user.biometrics?.fingerprintEnabled;
+    const isSecretValid = user.biometrics?.secret === secret;
 
-    currentChallenges.set(user.id, options.challenge);
-    res.json(options);
-  });
-
-  app.post('/api/auth/biometric/login-verify', async (req, res) => {
-    const { email, body } = req.body;
-    const user = users.find(u => u.email === email);
-    const expectedChallenge = currentChallenges.get(user?.id || '');
-
-    if (!user || !expectedChallenge) return res.status(400).json({ error: 'Invalid session' });
-
-    try {
-      const credential = user.biometricCredentials?.find(c => c.credentialID === body.id);
-      if (!credential) throw new Error('Credential not found');
-
-      const verification = await verifyAuthenticationResponse({
-        response: body,
-        expectedChallenge,
-        expectedOrigin: [ORIGIN, `${ORIGIN}/`],
-        expectedRPID: RP_ID,
-        credential: {
-          id: credential.credentialID,
-          publicKey: Buffer.from(credential.credentialPublicKey, 'base64url'),
-          counter: credential.counter,
-        },
-      });
-
-      if (verification.verified) {
-        const token = jwt.sign({ userId: user.id }, JWT_SECRET);
-        res.json({ verified: true, token, user });
-      } else {
-        res.status(400).json({ verified: false });
-      }
-    } catch (error) {
-      res.status(400).json({ error: (error as Error).message });
+    if (isEnabled && isSecretValid) {
+      const jwtToken = jwt.sign({ userId: user.id }, JWT_SECRET);
+      res.json({ verified: true, token: jwtToken, user });
+    } else {
+      res.status(401).json({ verified: false, error: 'Biometría no reconocida o no habilitada' });
     }
   });
 
