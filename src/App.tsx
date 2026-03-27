@@ -23,6 +23,7 @@ import {
   ScanFace
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import * as faceapi from '@vladmandic/face-api';
 import type { User, Message, Conversation } from './types';
 
 const SOCKET_URL = window.location.origin;
@@ -51,6 +52,8 @@ export default function App() {
   const [isScanningFace, setIsScanningFace] = useState(false);
   const [isScanningFinger, setIsScanningFinger] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+  const [isModelsLoaded, setIsModelsLoaded] = useState(false);
+  const [isFaceDetected, setIsFaceDetected] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -72,6 +75,24 @@ export default function App() {
         .then(data => setMessages(data));
     }
   }, [user, activeConversation]);
+
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        ]);
+        setIsModelsLoaded(true);
+        console.log('Face-api models loaded');
+      } catch (err) {
+        console.error('Error loading face-api models:', err);
+      }
+    };
+    loadModels();
+  }, []);
 
   useEffect(() => {
     // Check for biometric availability
@@ -205,22 +226,55 @@ export default function App() {
 
     // Visual animation and verification
     if (type === 'face') {
+      if (!isModelsLoaded) {
+        alert('Los modelos de reconocimiento facial aún se están cargando. Por favor, espera un momento.');
+        return;
+      }
+
       setIsScanningFace(true);
       setScanProgress(0);
+      setIsFaceDetected(false);
+      
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
         if (videoRef.current) videoRef.current.srcObject = stream;
         
-        for (let i = 0; i <= 100; i += 5) {
-          setScanProgress(i);
-          await new Promise(r => setTimeout(r, 80));
+        // Wait for video to be ready
+        await new Promise(resolve => {
+          if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
+        });
+
+        let descriptor: Float32Array | null = null;
+        const startTime = Date.now();
+        const timeout = 15000; // 15 seconds timeout
+
+        while (Date.now() - startTime < timeout) {
+          const detections = await faceapi.detectSingleFace(
+            videoRef.current!, 
+            new faceapi.TinyFaceDetectorOptions()
+          ).withFaceLandmarks().withFaceDescriptor();
+
+          if (detections) {
+            setIsFaceDetected(true);
+            descriptor = detections.descriptor;
+            setScanProgress(100);
+            break;
+          }
+
+          // Update progress based on time if not detected yet
+          const elapsed = Date.now() - startTime;
+          setScanProgress(Math.min(90, (elapsed / timeout) * 100));
+          await new Promise(r => setTimeout(r, 200));
         }
         
         stream.getTracks().forEach(track => track.stop());
         
-        // Keep scanning UI for a moment while we "verify"
-        setScanProgress(100);
-        
+        if (!descriptor) {
+          alert('No se pudo detectar un rostro claro. Asegúrate de estar en un lugar iluminado y frente a la cámara.');
+          setIsScanningFace(false);
+          return;
+        }
+
         const biometricSecret = localStorage.getItem('biometric_secret');
         if (!biometricSecret) {
           alert(`No has habilitado la biometría en este navegador. Por favor, inicia sesión con tu contraseña primero.`);
@@ -231,7 +285,12 @@ export default function App() {
         const res = await fetch('/api/auth/biometric/virtual-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, secret: biometricSecret, type })
+          body: JSON.stringify({ 
+            email, 
+            secret: biometricSecret, 
+            type,
+            faceDescriptor: Array.from(descriptor)
+          })
         });
         
         const data = await res.json();
@@ -297,22 +356,90 @@ export default function App() {
       
       // Visual animation
       if (type === 'face') {
+        if (!isModelsLoaded) {
+          alert('Los modelos de reconocimiento facial aún se están cargando. Por favor, espera un momento.');
+          return;
+        }
+
         setIsScanningFace(true);
         setScanProgress(0);
+        setIsFaceDetected(false);
+        
+        let faceDescriptor: number[] | undefined;
+
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
           if (videoRef.current) videoRef.current.srcObject = stream;
-          for (let i = 0; i <= 100; i += 5) {
-            setScanProgress(i);
-            await new Promise(r => setTimeout(r, 100));
+          
+          await new Promise(resolve => {
+            if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
+          });
+
+          const startTime = Date.now();
+          const timeout = 15000;
+
+          while (Date.now() - startTime < timeout) {
+            const detections = await faceapi.detectSingleFace(
+              videoRef.current!, 
+              new faceapi.TinyFaceDetectorOptions()
+            ).withFaceLandmarks().withFaceDescriptor();
+
+            if (detections) {
+              setIsFaceDetected(true);
+              faceDescriptor = Array.from(detections.descriptor);
+              setScanProgress(100);
+              break;
+            }
+
+            const elapsed = Date.now() - startTime;
+            setScanProgress(Math.min(90, (elapsed / timeout) * 100));
+            await new Promise(r => setTimeout(r, 200));
           }
+
           stream.getTracks().forEach(track => track.stop());
+          
+          if (!faceDescriptor) {
+            alert('No se pudo detectar un rostro claro para el registro. Inténtalo de nuevo en un lugar con mejor iluminación.');
+            setIsScanningFace(false);
+            return;
+          }
+
           setIsScanningFace(false);
         } catch (err) { 
           console.error('Face ID Registration Error:', err);
           alert('No se pudo acceder a la cámara para registrar Face ID.');
           setIsScanningFace(false);
-          return; // Stop if camera fails
+          return;
+        }
+
+        const res = await fetch('/api/auth/biometric/virtual-register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: user.id, 
+            type,
+            faceDescriptor
+          })
+        });
+        
+        const data = await res.json();
+        
+        if (data.verified) {
+          localStorage.setItem('biometric_secret', data.secret);
+          const updatedUser = { 
+            ...user, 
+            biometrics: {
+              ...user.biometrics,
+              [type === 'face' ? 'faceIdEnabled' : 'fingerprintEnabled']: true,
+              secret: data.secret,
+              faceDescriptor: faceDescriptor
+            }
+          };
+          setUser(updatedUser);
+          alert(`${type === 'face' ? 'Face ID' : 'Huella'} habilitada con éxito.`);
+          setShowBiometricModal(false);
+        } else {
+          throw new Error(data.error || 'Error de registro');
         }
       } else {
         setIsScanningFinger(true);
@@ -322,34 +449,34 @@ export default function App() {
           await new Promise(r => setTimeout(r, 80));
         }
         setIsScanningFinger(false);
-      }
 
-      const res = await fetch('/api/auth/biometric/virtual-register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: user.id, 
-          type
-        })
-      });
-      
-      const data = await res.json();
-      
-      if (data.verified) {
-        localStorage.setItem('biometric_secret', data.secret);
-        const updatedUser = { 
-          ...user, 
-          biometrics: {
-            ...user.biometrics,
-            [type === 'face' ? 'faceIdEnabled' : 'fingerprintEnabled']: true,
-            secret: data.secret
-          }
-        };
-        setUser(updatedUser);
-        alert(`${type === 'face' ? 'Face ID' : 'Huella'} habilitada con éxito.`);
-        setShowBiometricModal(false);
-      } else {
-        throw new Error(data.error || 'Error de registro');
+        const res = await fetch('/api/auth/biometric/virtual-register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: user.id, 
+            type
+          })
+        });
+        
+        const data = await res.json();
+        
+        if (data.verified) {
+          localStorage.setItem('biometric_secret', data.secret);
+          const updatedUser = { 
+            ...user, 
+            biometrics: {
+              ...user.biometrics,
+              fingerprintEnabled: true,
+              secret: data.secret
+            }
+          };
+          setUser(updatedUser);
+          alert('Huella habilitada con éxito.');
+          setShowBiometricModal(false);
+        } else {
+          throw new Error(data.error || 'Error de registro');
+        }
       }
     } catch (err: any) {
       console.error('Biometric Registration Error:', err);
@@ -883,6 +1010,14 @@ export default function App() {
                   />
                   {/* Scanning Grid Effect */}
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(168,85,247,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(168,85,247,0.1)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none" />
+                  
+                  {/* Face Detection Indicator */}
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 z-20">
+                    <div className={`w-2 h-2 rounded-full ${isFaceDetected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 animate-pulse'}`} />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-white">
+                      {isFaceDetected ? 'Rostro Detectado' : 'Buscando Rostro...'}
+                    </span>
+                  </div>
                 </div>
                 
                 {/* Scanning Overlay */}

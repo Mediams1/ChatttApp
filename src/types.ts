@@ -9,6 +9,7 @@ export interface User {
     faceIdEnabled: boolean;
     fingerprintEnabled: boolean;
     secret?: string;
+    faceDescriptor?: number[]; // 128-dimensional vector
   };
 }
 

@@ -135,7 +135,7 @@ async function startServer() {
 
   // --- Virtual Biometric Routes ---
   app.post('/api/auth/biometric/virtual-register', async (req, res) => {
-    const { userId, type } = req.body;
+    const { userId, type, faceDescriptor } = req.body;
     const user = users.find(u => u.id === userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -147,29 +147,53 @@ async function startServer() {
       };
     }
     
-    if (type === 'face') user.biometrics.faceIdEnabled = true;
+    if (type === 'face') {
+      user.biometrics.faceIdEnabled = true;
+      if (faceDescriptor) {
+        user.biometrics.faceDescriptor = faceDescriptor;
+      }
+    }
     if (type === 'fingerprint') user.biometrics.fingerprintEnabled = true;
     
-    console.log(`Biometric registered for user ${user.username}: type=${type}, face=${user.biometrics.faceIdEnabled}, finger=${user.biometrics.fingerprintEnabled}`);
+    console.log(`Biometric registered for user ${user.username}: type=${type}, face=${user.biometrics.faceIdEnabled}, finger=${user.biometrics.fingerprintEnabled}, hasDescriptor=${!!user.biometrics.faceDescriptor}`);
     
     saveData();
     res.json({ verified: true, secret: user.biometrics.secret });
   });
 
   app.post('/api/auth/biometric/virtual-login', async (req, res) => {
-    const { email, secret, type } = req.body;
+    const { email, secret, type, faceDescriptor } = req.body;
     const user = users.find(u => u.email === email);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const isEnabled = type === 'face' ? user.biometrics?.faceIdEnabled : user.biometrics?.fingerprintEnabled;
     const isSecretValid = user.biometrics?.secret === secret;
 
-    if (isEnabled && isSecretValid) {
-      const jwtToken = jwt.sign({ userId: user.id }, JWT_SECRET);
-      res.json({ verified: true, token: jwtToken, user });
-    } else {
-      res.status(401).json({ verified: false, error: 'Biometría no reconocida o no habilitada' });
+    if (!isEnabled || !isSecretValid) {
+      return res.status(401).json({ verified: false, error: 'Biometría no reconocida o no habilitada' });
     }
+
+    // Real Face Recognition Check
+    if (type === 'face' && user.biometrics?.faceDescriptor) {
+      if (!faceDescriptor) {
+        return res.status(400).json({ verified: false, error: 'No se detectó rostro para la verificación.' });
+      }
+
+      // Euclidean distance between descriptors
+      const dist = Math.sqrt(
+        user.biometrics.faceDescriptor.reduce((sum, val, i) => sum + Math.pow(val - faceDescriptor[i], 2), 0)
+      );
+
+      console.log(`Face recognition distance for ${user.username}: ${dist}`);
+
+      // Threshold for Face Recognition (0.6 is standard for face-api.js)
+      if (dist > 0.6) {
+        return res.status(401).json({ verified: false, error: 'Rostro no coincide con el registrado.' });
+      }
+    }
+
+    const jwtToken = jwt.sign({ userId: user.id }, JWT_SECRET);
+    res.json({ verified: true, token: jwtToken, user });
   });
 
   // --- User & Message Routes ---
