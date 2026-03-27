@@ -54,6 +54,7 @@ export default function App() {
   const [scanProgress, setScanProgress] = useState(0);
   const [isModelsLoaded, setIsModelsLoaded] = useState(false);
   const [isFaceDetected, setIsFaceDetected] = useState(false);
+  const [faceCaptureStatus, setFaceCaptureStatus] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -234,6 +235,7 @@ export default function App() {
       setIsScanningFace(true);
       setScanProgress(0);
       setIsFaceDetected(false);
+      setFaceCaptureStatus('Iniciando cámara...');
       
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
@@ -244,6 +246,7 @@ export default function App() {
           if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
         });
 
+        setFaceCaptureStatus('Buscando rostro...');
         let descriptor: Float32Array | null = null;
         const startTime = Date.now();
         const timeout = 15000; // 15 seconds timeout
@@ -258,6 +261,7 @@ export default function App() {
             setIsFaceDetected(true);
             descriptor = detections.descriptor;
             setScanProgress(100);
+            setFaceCaptureStatus('Rostro detectado. Verificando...');
             break;
           }
 
@@ -307,6 +311,7 @@ export default function App() {
         alert('Error de Face ID: No se pudo acceder a la cámara o el escaneo falló.');
       } finally {
         setIsScanningFace(false);
+        setFaceCaptureStatus('');
       }
     } else {
       setIsScanningFinger(true);
@@ -364,8 +369,11 @@ export default function App() {
         setIsScanningFace(true);
         setScanProgress(0);
         setIsFaceDetected(false);
+        setFaceCaptureStatus('Iniciando cámara...');
         
         let faceDescriptor: number[] | undefined;
+        const descriptors: Float32Array[] = [];
+        const requiredSamples = 5;
 
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
@@ -375,10 +383,11 @@ export default function App() {
             if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
           });
 
+          setFaceCaptureStatus('Buscando rostro...');
           const startTime = Date.now();
-          const timeout = 15000;
+          const timeout = 30000; // Increased timeout for multiple samples
 
-          while (Date.now() - startTime < timeout) {
+          while (Date.now() - startTime < timeout && descriptors.length < requiredSamples) {
             const detections = await faceapi.detectSingleFace(
               videoRef.current!, 
               new faceapi.TinyFaceDetectorOptions()
@@ -386,24 +395,45 @@ export default function App() {
 
             if (detections) {
               setIsFaceDetected(true);
-              faceDescriptor = Array.from(detections.descriptor);
-              setScanProgress(100);
-              break;
+              descriptors.push(detections.descriptor);
+              setFaceCaptureStatus(`Capturando muestras: ${descriptors.length}/${requiredSamples}`);
+              setScanProgress((descriptors.length / requiredSamples) * 100);
+              
+              // Brief pause between samples
+              await new Promise(r => setTimeout(r, 400));
+            } else {
+              setIsFaceDetected(false);
+              // Only update status if we haven't finished
+              if (descriptors.length < requiredSamples) {
+                setFaceCaptureStatus(descriptors.length > 0 ? `Rostro perdido... (${descriptors.length}/${requiredSamples})` : 'Buscando rostro...');
+              }
             }
 
-            const elapsed = Date.now() - startTime;
-            setScanProgress(Math.min(90, (elapsed / timeout) * 100));
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 100));
           }
 
           stream.getTracks().forEach(track => track.stop());
           
-          if (!faceDescriptor) {
-            alert('No se pudo detectar un rostro claro para el registro. Inténtalo de nuevo en un lugar con mejor iluminación.');
+          if (descriptors.length < requiredSamples) {
+            alert(`No se pudieron capturar suficientes muestras (${descriptors.length}/${requiredSamples}). Inténtalo de nuevo en un lugar con mejor iluminación.`);
             setIsScanningFace(false);
             return;
           }
 
+          // Average the descriptors
+          const avgDescriptor = new Float32Array(128).fill(0);
+          for (const desc of descriptors) {
+            for (let i = 0; i < 128; i++) {
+              avgDescriptor[i] += desc[i];
+            }
+          }
+          for (let i = 0; i < 128; i++) {
+            avgDescriptor[i] /= descriptors.length;
+          }
+          
+          faceDescriptor = Array.from(avgDescriptor);
+          setFaceCaptureStatus('¡Registro completado!');
+          await new Promise(r => setTimeout(r, 500));
           setIsScanningFace(false);
         } catch (err) { 
           console.error('Face ID Registration Error:', err);
@@ -485,6 +515,7 @@ export default function App() {
       setIsScanningFace(false);
       setIsScanningFinger(false);
       setBiometricType(null);
+      setFaceCaptureStatus('');
     }
   };
 
@@ -1057,8 +1088,14 @@ export default function App() {
                 </div>
               </div>
 
-              <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Reconociendo Rostro...</h3>
-              <p className="text-gray-400 text-center mb-8 px-8">Mantén tu rostro dentro del marco y no te muevas.</p>
+              <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">
+                {faceCaptureStatus || 'Reconociendo Rostro...'}
+              </h3>
+              <p className="text-gray-400 text-center mb-8 px-8">
+                {faceCaptureStatus.includes('muestras') 
+                  ? 'Mueve ligeramente la cabeza para capturar diferentes ángulos.' 
+                  : 'Mantén tu rostro dentro del marco y no te muevas.'}
+              </p>
               
               <div className="w-full max-w-[200px] h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <motion.div 
