@@ -184,10 +184,10 @@ async function startServer() {
         user.biometrics.faceDescriptor.reduce((sum, val, i) => sum + Math.pow(val - faceDescriptor[i], 2), 0)
       );
 
-      console.log(`[AUTH] Face recognition distance for ${user.username}: ${dist.toFixed(4)} (Threshold: 0.6)`);
-
-      // Threshold for Face Recognition (0.6 is standard for face-api.js)
-      if (dist > 0.6) {
+      console.log(`[AUTH] Face recognition distance for ${user.username}: ${dist.toFixed(4)} (Threshold: 0.65)`);
+      
+      // Threshold for Face Recognition (0.6 is standard, 0.65 is slightly more forgiving)
+      if (dist > 0.65) {
         console.log(`[AUTH] Face recognition failed for ${user.username} - Distance too high: ${dist.toFixed(4)}`);
         return res.status(401).json({ verified: false, error: 'Rostro no coincide con el registrado.' });
       }

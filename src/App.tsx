@@ -244,19 +244,31 @@ export default function App() {
         
         // Wait for videoRef to be available (modal needs to mount)
         let attempts = 0;
-        while (!videoRef.current && attempts < 30) {
+        const maxAttempts = 100; // 10 seconds total
+        while (!videoRef.current && attempts < maxAttempts) {
           await new Promise(r => setTimeout(r, 100));
           attempts++;
         }
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          // Wait for video to be ready
+          // Explicitly call play and wait for it
+          try {
+            await videoRef.current.play();
+          } catch (playErr) {
+            console.warn('Auto-play failed, waiting for user interaction:', playErr);
+          }
+          
+          // Wait for video to be ready for processing
           await new Promise(resolve => {
-            if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
+            if (videoRef.current && videoRef.current.readyState >= 2) {
+              resolve(null);
+            } else if (videoRef.current) {
+              videoRef.current.onloadedmetadata = () => resolve(null);
+            }
           });
         } else {
-          throw new Error('No se pudo encontrar el elemento de video.');
+          throw new Error('No se pudo encontrar el elemento de video en el tiempo esperado.');
         }
 
         setFaceCaptureStatus('Buscando rostro...');
@@ -416,18 +428,29 @@ export default function App() {
           
           // Wait for videoRef to be available (modal needs to mount)
           let attempts = 0;
-          while (!videoRef.current && attempts < 30) {
+          const maxAttempts = 100; // 10 seconds total
+          while (!videoRef.current && attempts < maxAttempts) {
             await new Promise(r => setTimeout(r, 100));
             attempts++;
           }
 
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            try {
+              await videoRef.current.play();
+            } catch (playErr) {
+              console.warn('Auto-play failed:', playErr);
+            }
+            
             await new Promise(resolve => {
-              if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
+              if (videoRef.current && videoRef.current.readyState >= 2) {
+                resolve(null);
+              } else if (videoRef.current) {
+                videoRef.current.onloadedmetadata = () => resolve(null);
+              }
             });
           } else {
-            throw new Error('No se pudo encontrar el elemento de video.');
+            throw new Error('No se pudo encontrar el elemento de video en el tiempo esperado.');
           }
 
           setFaceCaptureStatus('Buscando rostro...');
@@ -1177,6 +1200,13 @@ export default function App() {
                 />
               </div>
               <p className="mt-4 text-purple-400 font-mono text-sm">{scanProgress}%</p>
+              
+              <button 
+                onClick={() => setIsScanningFace(false)}
+                className="mt-8 px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-full text-sm font-medium transition-colors"
+              >
+                Cancelar
+              </button>
             </motion.div>
           </div>
         )}
