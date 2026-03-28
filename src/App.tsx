@@ -238,14 +238,26 @@ export default function App() {
       setIsFaceDetected(false);
       setFaceCaptureStatus('Iniciando cámara...');
       
+      let stream: MediaStream | null = null;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-        if (videoRef.current) videoRef.current.srcObject = stream;
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
         
-        // Wait for video to be ready
-        await new Promise(resolve => {
-          if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
-        });
+        // Wait for videoRef to be available (modal needs to mount)
+        let attempts = 0;
+        while (!videoRef.current && attempts < 30) {
+          await new Promise(r => setTimeout(r, 100));
+          attempts++;
+        }
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          // Wait for video to be ready
+          await new Promise(resolve => {
+            if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
+          });
+        } else {
+          throw new Error('No se pudo encontrar el elemento de video.');
+        }
 
         setFaceCaptureStatus('Buscando rostro...');
         let descriptor: Float32Array | null = null;
@@ -253,8 +265,10 @@ export default function App() {
         const timeout = 15000; // 15 seconds timeout
 
         while (Date.now() - startTime < timeout) {
+          if (!videoRef.current) break;
+          
           const detections = await faceapi.detectSingleFace(
-            videoRef.current!, 
+            videoRef.current, 
             new faceapi.TinyFaceDetectorOptions()
           ).withFaceLandmarks().withFaceDescriptor();
 
@@ -291,7 +305,7 @@ export default function App() {
           await new Promise(r => setTimeout(r, 200));
         }
         
-        stream.getTracks().forEach(track => track.stop());
+        if (stream) stream.getTracks().forEach(track => track.stop());
         
         if (!descriptor) {
           alert('No se pudo detectar un rostro claro. Asegúrate de estar en un lugar iluminado y frente a la cámara.');
@@ -326,9 +340,10 @@ export default function App() {
         } else {
           alert(data.error || 'Error en Face ID.');
         }
-      } catch (err) { 
+      } catch (err: any) { 
         console.error('Face ID Error:', err);
-        alert('Error de Face ID: No se pudo acceder a la cámara o el escaneo falló.');
+        if (stream) stream.getTracks().forEach(track => track.stop());
+        alert(`Error de Face ID: ${err.message || 'No se pudo acceder a la cámara o el escaneo falló.'}`);
       } finally {
         setIsScanningFace(false);
         setFaceCaptureStatus('');
@@ -394,22 +409,36 @@ export default function App() {
         let faceDescriptor: number[] | undefined;
         const descriptors: Float32Array[] = [];
         const requiredSamples = 5;
+        let stream: MediaStream | null = null;
 
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-          if (videoRef.current) videoRef.current.srcObject = stream;
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
           
-          await new Promise(resolve => {
-            if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
-          });
+          // Wait for videoRef to be available (modal needs to mount)
+          let attempts = 0;
+          while (!videoRef.current && attempts < 30) {
+            await new Promise(r => setTimeout(r, 100));
+            attempts++;
+          }
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            await new Promise(resolve => {
+              if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
+            });
+          } else {
+            throw new Error('No se pudo encontrar el elemento de video.');
+          }
 
           setFaceCaptureStatus('Buscando rostro...');
           const startTime = Date.now();
           const timeout = 30000; // Increased timeout for multiple samples
 
           while (Date.now() - startTime < timeout && descriptors.length < requiredSamples) {
+            if (!videoRef.current) break;
+
             const detections = await faceapi.detectSingleFace(
-              videoRef.current!, 
+              videoRef.current, 
               new faceapi.TinyFaceDetectorOptions()
             ).withFaceLandmarks().withFaceDescriptor();
 
@@ -450,7 +479,7 @@ export default function App() {
             await new Promise(r => setTimeout(r, 100));
           }
 
-          stream.getTracks().forEach(track => track.stop());
+          if (stream) stream.getTracks().forEach(track => track.stop());
           
           if (descriptors.length < requiredSamples) {
             alert(`No se pudieron capturar suficientes muestras (${descriptors.length}/${requiredSamples}). Inténtalo de nuevo en un lugar con mejor iluminación.`);
@@ -473,9 +502,10 @@ export default function App() {
           setFaceCaptureStatus('¡Registro completado!');
           await new Promise(r => setTimeout(r, 500));
           setIsScanningFace(false);
-        } catch (err) { 
+        } catch (err: any) { 
           console.error('Face ID Registration Error:', err);
-          alert('No se pudo acceder a la cámara para registrar Face ID.');
+          if (stream) stream.getTracks().forEach(track => track.stop());
+          alert(`No se pudo acceder a la cámara para registrar Face ID: ${err.message}`);
           setIsScanningFace(false);
           return;
         }
