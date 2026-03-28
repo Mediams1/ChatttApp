@@ -60,6 +60,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     if (user) {
@@ -262,7 +263,26 @@ export default function App() {
             descriptor = detections.descriptor;
             setScanProgress(100);
             setFaceCaptureStatus('Rostro detectado. Verificando...');
+
+            // Draw detection on canvas
+            if (canvasRef.current && videoRef.current) {
+              const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
+              faceapi.matchDimensions(canvasRef.current, displaySize);
+              const resizedDetections = faceapi.resizeResults(detections, displaySize);
+              const ctx = canvasRef.current.getContext('2d');
+              if (ctx) {
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                faceapi.draw.drawDetections(canvasRef.current, resizedDetections);
+                faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetections);
+              }
+            }
             break;
+          } else {
+            // Clear canvas if no face
+            if (canvasRef.current) {
+              const ctx = canvasRef.current.getContext('2d');
+              ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            }
           }
 
           // Update progress based on time if not detected yet
@@ -399,10 +419,28 @@ export default function App() {
               setFaceCaptureStatus(`Capturando muestras: ${descriptors.length}/${requiredSamples}`);
               setScanProgress((descriptors.length / requiredSamples) * 100);
               
+              // Draw detection on canvas
+              if (canvasRef.current && videoRef.current) {
+                const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
+                faceapi.matchDimensions(canvasRef.current, displaySize);
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const ctx = canvasRef.current.getContext('2d');
+                if (ctx) {
+                  ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                  faceapi.draw.drawDetections(canvasRef.current, resizedDetections);
+                  faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetections);
+                }
+              }
+
               // Brief pause between samples
               await new Promise(r => setTimeout(r, 400));
             } else {
               setIsFaceDetected(false);
+              // Clear canvas if no face
+              if (canvasRef.current) {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+              }
               // Only update status if we haven't finished
               if (descriptors.length < requiredSamples) {
                 setFaceCaptureStatus(descriptors.length > 0 ? `Rostro perdido... (${descriptors.length}/${requiredSamples})` : 'Buscando rostro...');
@@ -1038,6 +1076,10 @@ export default function App() {
                     autoPlay 
                     playsInline 
                     className="w-full h-full object-cover scale-x-[-1]"
+                  />
+                  <canvas 
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full object-cover scale-x-[-1] pointer-events-none z-10"
                   />
                   {/* Scanning Grid Effect */}
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(168,85,247,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(168,85,247,0.1)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none" />
